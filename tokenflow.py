@@ -4,9 +4,14 @@ import json
 import sys
 import csv
 import time
+import os
+import xml.etree.ElementTree as ET
 from datetime import datetime
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 from urllib.parse import unquote_plus
+
+SERVICE_MAP_FILE = Path(".tokenflow_services.json")
 
 class Service:
     def __init__(self, name, auth_url, client_id, client_secret, token_url, redirect_uri, userinfo_url):
@@ -17,6 +22,65 @@ class Service:
         self.token_url = token_url
         self.redirect_uri = redirect_uri
         self.userinfo_url = userinfo_url
+
+def save_service_map(service_map):
+    with open(SERVICE_MAP_FILE, "w") as f:
+        json.dump(service_map, f, indent=2)
+
+def load_service_map():
+    if SERVICE_MAP_FILE.exists():
+        with open(SERVICE_MAP_FILE) as f:
+            return json.load(f)
+    return {}
+
+def add_service_to_map(name, metadata_url):
+    service_map = load_service_map()
+    service_map[name] = metadata_url
+    save_service_map(service_map)
+    print(f"✅ Added service '{name}' to local map.")
+
+def parse_oidc_metadata(xml_content):
+    ns = {
+        "md": "urn:oasis:names:tc:SAML:2.0:metadata",
+        "oidcmd": "urn:mace:shibboleth:metadata:oidc:1.0"
+    }
+    root = ET.fromstring(xml_content)
+    client_id = root.find(".//oidcmd:ClientSecretKeyReference", ns).text
+    redirect_uri = root.find(".//md:AssertionConsumerService", ns).attrib["Location"]
+    auth_url = "https://shib-qa.unl.edu/idp/profile/oidc/authorize"
+    token_url = "https://shib-qa.unl.edu/idp/profile/oidc/token"
+    userinfo_url = "https://shib-qa.unl.edu/idp/profile/oidc/userinfo"
+    return client_id, redirect_uri, auth_url, token_url, userinfo_url
+
+def build_services_from_names(service_names):
+    services = []
+    service_map = load_service_map()
+    for name in service_names:
+        if name not in service_map:
+            print(f"[❌] Service '{name}' not found in local map. Use --add-service to add it.")
+            continue
+        xml_url = service_map[name]
+        try:
+            response = requests.get(xml_url)
+            response.raise_for_status()
+            client_id, redirect_uri, auth_url, token_url, userinfo_url = parse_oidc_metadata(response.text)
+            secret_env_key = name.upper() + "_SECRET"
+            client_secret = os.environ.get(secret_env_key)
+            if not client_secret:
+                raise Exception(f"Environment variable '{secret_env_key}' not set.")
+            svc = Service(
+                name=name,
+                auth_url=auth_url + f"?client_id={client_id}&scope=email%20openid&response_type=code%20id_token&redirect_uri={redirect_uri}&state=1234&response_mode=form_post&nonce=garbage",
+                client_id=client_id,
+                client_secret=client_secret,
+                token_url=token_url,
+                redirect_uri=redirect_uri,
+                userinfo_url=userinfo_url
+            )
+            services.append(svc)
+        except Exception as e:
+            print(f"[⚠️] Failed to fetch metadata for '{name}': {e}")
+    return services
 
 def get_auth_code_via_playwright(auth_url, redirect_uri, context):
     page = context.new_page()
@@ -61,7 +125,6 @@ def get_auth_code_via_playwright(auth_url, redirect_uri, context):
     page.close()
 
     if not auth_code:
-        print("[❌] Failed to obtain authorization code")
         raise Exception("Authorization code not found")
 
     return auth_code
@@ -74,12 +137,9 @@ def exchange_code_for_token(auth_code, client_id, client_secret, token_url, redi
         'client_id': client_id,
         'client_secret': client_secret
     }
-
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
     response = requests.post(token_url, data=data, headers=headers)
     print(f"[📥] Response ({response.status_code}): {response.text}")
-
     response.raise_for_status()
     return response.json()
 
@@ -90,28 +150,33 @@ def get_user_info(access_token, userinfo_url):
     return response.json()
 
 def main():
-    parser = argparse.ArgumentParser(description="OIDC Authentication Multi-Service Flow")
-    parser.add_argument('--json', action='store_true', help='Output in JSON format')
-    parser.add_argument('--output', default='tokenflow_results.csv', help='Path to save CSV results')
-    parser.add_argument('services', nargs='+', metavar='SERVICE', help='Multiple service definitions as JSON strings')
+    parser = argparse.ArgumentParser(description="TokenFlow - Automated OIDC QA Testing Tool")
+    parser.add_argument('--add-service', nargs=2, metavar=('NAME', 'METADATA_URL'), help='Add a new service')
+    parser.add_argument('--list-services', action='store_true', help='List available services')
+    parser.add_argument('--run', nargs='+', metavar='SERVICE_NAME', help='Run OIDC test on specified services')
+    parser.add_argument('--output', default='tokenflow_results.csv', help='CSV file to write results to')
+    parser.add_argument('--json', action='store_true', help='Print userinfo in JSON format')
     args = parser.parse_args()
 
-    services = []
-    for svc_raw in args.services:
-        svc_dict = json.loads(svc_raw)
-        svc = Service(
-            name=svc_dict.get('name', 'Unnamed Service'),
-            auth_url=svc_dict['auth_url'],
-            client_id=svc_dict['client_id'],
-            client_secret=svc_dict['client_secret'],
-            token_url=svc_dict['token_url'],
-            redirect_uri=svc_dict['redirect_uri'],
-            userinfo_url=svc_dict['userinfo_url']
-        )
-        services.append(svc)
+    if args.add_service:
+        name, url = args.add_service
+        add_service_to_map(name, url)
+        return
+
+    if args.list_services:
+        service_map = load_service_map()
+        print("\nAvailable services:")
+        for k, v in service_map.items():
+            print(f"- {k}: {v}")
+        return
+
+    if args.run:
+        services = build_services_from_names(args.run)
+    else:
+        print("[❌] No services specified. Use --run or --add-service.")
+        return
 
     results = []
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         context = browser.new_context()
@@ -126,21 +191,12 @@ def main():
                 "Timestamp": datetime.now().isoformat()
             }
             try:
-                if i == 0:
-                    print("[🔓] Initiating login for first service")
-                else:
-                    print("[🔁] Reusing session to open next auth flow")
-
                 auth_code = get_auth_code_via_playwright(svc.auth_url, svc.redirect_uri, context)
                 result["Auth Code Captured"] = "Yes"
-                print(f"[🔑] Authorization code: {auth_code}")
 
                 tokens = exchange_code_for_token(
-                    auth_code,
-                    svc.client_id,
-                    svc.client_secret,
-                    svc.token_url,
-                    svc.redirect_uri
+                    auth_code, svc.client_id, svc.client_secret,
+                    svc.token_url, svc.redirect_uri
                 )
                 result["Token Exchange"] = "Success"
 
@@ -163,13 +219,13 @@ def main():
         context.close()
         browser.close()
 
-    # Write CSV
     keys = ["Service Name", "Auth Code Captured", "Token Exchange", "UserInfo", "Timestamp", "Error"]
     with open(args.output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
         for row in results:
             writer.writerow(row)
+
     print(f"\n✅ Results saved to {args.output}")
 
 if __name__ == '__main__':

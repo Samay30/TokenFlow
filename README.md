@@ -1,87 +1,111 @@
 
-# TokenFlow 🔐
+# TokenFlow
 
-**TokenFlow** is a Python-based CLI tool that automates OpenID Connect (OIDC) code flow testing across multiple services — all using a single browser login session.
+## Overview
 
-It launches a real browser using Playwright, intercepts authorization codes, exchanges them for tokens, fetches userinfo, and logs test results into a CSV report.
-
----
-
-## 🚀 Features
-
-- ✅ Supports **multiple OIDC services** in one session
-- 🧠 Captures `authorization_code` from form_post responses
-- 🔁 Reuses browser session across tests
-- 🧾 Exports a **CSV report** with pass/fail, timestamp, and identity
-- 🔐 Redacts secrets and is safe to demo or audit
+**TokenFlow** is a Python-based CLI tool that automates OpenID Connect (OIDC) service validation across multiple services with a single login session.
+It fetches metadata, launches a browser to capture authorization codes, exchanges them for tokens, and retrieves user information.
 
 ---
 
-## 🛠️ Requirements
+## Getting Started
 
-- Python 3.8+
-- Playwright installed and set up:
-  ```bash
-  pip install -r requirements.txt
-  playwright install
-  ```
-
----
-
-## 📦 Installation
-
+### 1. Clone the repository
 ```bash
-git clone https://github.com/your-org/tokenflow.git
+git clone https://your-org/tokenflow.git
 cd tokenflow
+```
+
+### 2. Create a virtual environment
+```bash
 python3 -m venv myenv
-source myenv/bin/activate     # or myenv\Scripts\activate on Windows
+source myenv/bin/activate  # (Linux/macOS)
+myenv\Scripts\activate    # (Windows)
+```
+
+### 3. Install dependencies
+```bash
 pip install -r requirements.txt
+```
+
+### 4. Install Playwright browsers
+```bash
 playwright install
 ```
 
 ---
 
-## ⚙️ Usage
+## Usage
 
-You can test multiple OIDC services with one login by passing inline JSON strings:
-
+### Add a Service
+Add an OIDC service dynamically using the metadata URL:
 ```bash
-python tokenflow.py --output results.csv --json \
-  '{ "name": "Service A", "auth_url": "<AUTH_URL>", "client_id": "<CLIENT_ID>", "client_secret": "<SECRET>", "token_url": "<TOKEN_URL>", "redirect_uri": "<REDIRECT_URI>", "userinfo_url": "<USERINFO_URL>" }' \
-  '{ "name": "Service B", "auth_url": "<AUTH_URL>", "client_id": "<CLIENT_ID>", "client_secret": "<SECRET>", "token_url": "<TOKEN_URL>", "redirect_uri": "<REDIRECT_URI>", "userinfo_url": "<USERINFO_URL>" }'
+python tokenflow.py --add-service unpd0002 "https://git.unl.edu/iam-pub/metadata/-/raw/master/oidc/edu-unl-unpd0002.xml"
 ```
 
-> ⚠️ Make sure to URL-encode `scope`, `response_type`, etc., in your `auth_url`.  
-> Avoid exposing real client secrets when sharing commands.
+### Set Environment Variables for Secrets
+```bash
+export UNPD0002_SECRET="your-client-secret"
+```
+
+### Run Tests
+```bash
+python tokenflow.py --run unpd0002
+```
+
+Run multiple services together:
+```bash
+python tokenflow.py --run unpd0002 unpd0016
+```
+
+Optional flags:
+- `--json` to print userinfo claims as JSON.
+- `--output <filename>` to specify a CSV output file.
+
+Example:
+```bash
+python tokenflow.py --run unpd0002 unpd0016 --json --output results.csv
+```
+
+### List All Saved Services
+```bash
+python tokenflow.py --list-services
+```
 
 ---
 
-## 🧪 Output
+## CSV Output
+A CSV report is generated after testing:
 
-A CSV file is generated (default: `tokenflow_results.csv`) with columns:
-
-- Service Name
-- Auth Code Captured
-- Token Exchange (Success/Failed)
-- UserInfo (email/sub)
-- Timestamp
-- Error (if any)
-
----
-
-## 📄 Documentation
-
-📘 [Download PDF Guide](https://your-link.com/TokenFlow_Documentation.pdf)
+| Column | Description |
+|:-------|:------------|
+| Service Name | Service tested |
+| Auth Code Captured | Yes/No |
+| Token Exchange | Success/Failure |
+| UserInfo | Retrieved info or status |
+| Timestamp | Date and time of testing |
+| Error | Any error message |
 
 ---
 
-## 👤 Author
+## Troubleshooting
 
-**Samay Bhojwani**  
-[LinkedIn Profile](https://www.linkedin.com/in/samay-bhojwani-032060260/)
+- **invalid_grant**: Ensure client_id, redirect_uri, and secrets match.
+- **No auth code extracted**: Complete login including MFA.
+- **Environment variables missing**: Ensure the proper secret variables are set.
+- **Browser issues**: Make sure to run `playwright install`.
 
 ---
 
-## 📜 License
+## Notes
+- Services must support authorization code or hybrid flow.
+- Client secrets are managed securely via environment variables.
+- Metadata is parsed dynamically for flexibility.
 
-MIT License © 2025 Samay Bhojwani
+---
+
+## Developed by
+**Samay Bhojwani - 2025**
+
+🔗 [Connect with me on LinkedIn](https://www.linkedin.com/in/samay-bhojwani-032060260/)
+

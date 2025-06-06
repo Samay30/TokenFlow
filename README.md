@@ -1,3 +1,10 @@
+## License
+
+TokenFlow is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 License.
+
+© 2025 Samay Bhojwani. All rights reserved.
+
+See the [LICENSE](./LICENSE) file for more details.
 
 # TokenFlow
 

@@ -1,0 +1,2 @@
+Service Name,Auth Code Captured,Token Exchange,UserInfo,Timestamp,Error
+inowweb,No,Failed,N/A,2025-06-06T14:10:28.124271,"Page.wait_for_timeout: Target page, context or browser has been closed"
